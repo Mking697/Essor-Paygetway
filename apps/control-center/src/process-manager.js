@@ -267,6 +267,14 @@ export class ProcessManager extends EventEmitter {
         this.appendLog(svc.id, 'system', 'Skipping SMS Observer (YOUPI_OBSERVER_CHANNEL=GMAIL_ONLY)');
         continue;
       }
+      // The reference demo store is an optional showcase, not part of the gateway itself.
+      // Deployments that don't want it reachable at all (not even internally) can disable it
+      // outright instead of relying on a runtime stop that doesn't survive a container/process
+      // restart (startAll() runs again on every restart and would otherwise relaunch it).
+      if (svc.id === 'coin-wallet-store' && process.env.DISABLE_DEMO_STORE === 'true') {
+        this.appendLog(svc.id, 'system', 'Skipping Demo Store (DISABLE_DEMO_STORE=true)');
+        continue;
+      }
       try {
         await this.startService(svc.id);
       } catch (err) {
