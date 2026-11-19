@@ -127,10 +127,24 @@ export function registerPollerRoutes(server, ctx) {
 
   // POST /api/v1/pollers/events (Universal Observation Ingest for Gmail / SMS 2-Layer Observers)
   server.post('/api/v1/pollers/events', async (req, res) => {
-    const body = await HttpServer.parseBody(req);
+    const deviceId = req.headers['x-device-id'];
+
+    // Device-authenticated calls need the exact raw bytes to verify the HMAC signature, so
+    // read the body ourselves instead of HttpServer.parseBody (which only returns parsed JSON).
+    const rawBodyText = await new Promise(resolve => {
+      let data = '';
+      req.on('data', chunk => { data += chunk; });
+      req.on('end', () => resolve(data));
+    });
+    let body;
+    try {
+      body = rawBodyText.trim() ? JSON.parse(rawBodyText) : {};
+    } catch {
+      HttpServer.json(res, 400, { error: 'Invalid JSON payload.' });
+      return;
+    }
 
     // Android Observer Device Authentication for observation ingest
-    const deviceId = req.headers['x-device-id'];
     let deviceMerchantId = null;
     let deviceAccountId = null;
     if (deviceId) {
@@ -139,6 +153,36 @@ export function registerPollerRoutes(server, ctx) {
         HttpServer.json(res, 403, { error: 'Device not authorized or inactive.', code: 'DEVICE_UNAUTHORIZED' });
         return;
       }
+
+      // Security Invariant: auth-guard lets a request through on X-Device-Id alone, with no
+      // proof the caller actually holds that device's signing key (only that the device id
+      // exists). A caller who already presented the trusted admin/observer bearer token is a
+      // known operator (CI, dashboard, other observers) using X-Device-Id only for account
+      // binding, so it is not re-challenged. An UNAUTHENTICATED caller supplying only
+      // X-Device-Id must now prove possession of the device's signing key with the same
+      // HMAC-over-raw-body + timestamp scheme as the dedicated Android ingest route
+      // (handleAndroidSmsEvents); otherwise a leaked/guessed device UUID was enough to inject
+      // arbitrary observations.
+      const isTrustedBearer = isAdminRequest(req) || hasBearer(req, getObserverToken());
+      if (!isTrustedBearer) {
+        const timestampStr = req.headers['x-timestamp'];
+        const signature = req.headers['x-signature'];
+        if (!device.signing_key_hash || !timestampStr || !signature) {
+          HttpServer.json(res, 401, { error: 'Missing X-Timestamp / X-Signature headers for device-authenticated observation.', code: 'DEVICE_SIGNATURE_REQUIRED' });
+          return;
+        }
+        const ts = Number(timestampStr);
+        if (isNaN(ts) || Math.abs(Date.now() - ts) > 60000) {
+          HttpServer.json(res, 401, { error: 'Timestamp drift exceeded validity window (replay protection triggered).', code: 'DEVICE_TIMESTAMP_INVALID' });
+          return;
+        }
+        const sigPayload = `${rawBodyText}:${timestampStr}`;
+        if (!verifyHmac(sigPayload, device.signing_key_hash, signature)) {
+          HttpServer.json(res, 401, { error: 'Invalid cryptographic HMAC signature.', code: 'DEVICE_SIGNATURE_INVALID' });
+          return;
+        }
+      }
+
       const activeAcc = ctx.accountRepo
         ? ctx.accountRepo.findActiveForMerchant(device.merchant_id)
         : ctx.db.queryOne('SELECT id FROM payment_receiving_accounts WHERE merchant_id = ? AND is_active = 1 LIMIT 1', [device.merchant_id]);

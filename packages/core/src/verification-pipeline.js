@@ -494,6 +494,34 @@ export class PaymentVerificationPipeline {
       });
     }
 
+    // Invariant 1b: Reject debit notifications. A debit indicator that appears before any
+    // credit indicator means money LEFT the account (e.g. an ICICI debit alert that names the
+    // payee as "...credited"), so it must not be treated as a payment received. A debit
+    // mentioned after a credit (e.g. SMS charges) must not cancel the credit - ordering decides.
+    // Same word list / ordering as BankSmsParser so the two stay in sync (see bank-sms-parser.js).
+    {
+      const debitIdx = rawText.search(/\b(?:debited|withdrawn|deducted|spent|paid rs|sent rs)\b/i);
+      const creditIdx = rawText.search(/\b(?:credited|received|deposit|deposited)\b/i);
+      if (debitIdx !== -1 && (creditIdx === -1 || debitIdx < creditIdx)) {
+        stage3 = {
+          stage: 3,
+          name: 'PARSER',
+          status: 'FAILED',
+          reason: 'DEBIT_TRANSACTION',
+          details: 'Message is a debit/outgoing transaction notification (debit indicator precedes any credit indicator), not a credit/payment-received notification.'
+        };
+        return buildResult({
+          finalStatus: 'REJECTED',
+          failingStage: 3,
+          failingCondition: 'DEBIT_TRANSACTION',
+          failingReason: stage3.details,
+          stage2,
+          stage3,
+          session
+        });
+      }
+    }
+
     // Invariant 2: Check Indian currency indicator (Rs, Rs., ₹, or INR)
     const currencyKeywords = /(?:\b(?:rs\.?|inr)\b|₹|(?:rs\.?|inr|₹)\s*\d|\d\s*(?:rs\.?|inr|₹))/i;
     if (!currencyKeywords.test(rawText)) {
