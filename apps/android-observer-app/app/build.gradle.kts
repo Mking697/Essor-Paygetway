@@ -36,4 +36,8 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // QrScannerActivity.java decodes paired QR frames with ZXing's core decoder
+    // (com.google.zxing.*). The jar is already vendored at app/libs/core-3.5.3.jar but was
+    // never wired into the dependency list, so a release build never compiled.
+    implementation(files("libs/core-3.5.3.jar"))
 }
