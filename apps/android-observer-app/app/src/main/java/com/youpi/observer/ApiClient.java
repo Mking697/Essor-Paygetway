@@ -55,10 +55,18 @@ public class ApiClient {
     }
 
     public boolean pair(String baseUrl, String enrollmentToken, String deviceName) {
-        return pair(baseUrl, enrollmentToken, deviceName, "00000000-0000-0000-0000-000000000001", "v1", 0);
+        return pair(baseUrl, enrollmentToken, deviceName, "00000000-0000-0000-0000-000000000001", "v1", 0, null);
     }
 
     public boolean pair(String baseUrl, String enrollmentToken, String deviceName, String merchantId, String version, long expiresAt) {
+        return pair(baseUrl, enrollmentToken, deviceName, merchantId, version, expiresAt, null);
+    }
+
+    // sessionId binds this pairing attempt to the specific one-time, server-expiring pairing
+    // record created when the QR was generated (see payment-api pollers.routes.js
+    // pendingPairingSessions). Without it the server cannot distinguish a fresh QR scan from
+    // a stale/replayed one, so always pass the sessionId read from the scanned QR JSON.
+    public boolean pair(String baseUrl, String enrollmentToken, String deviceName, String merchantId, String version, long expiresAt, String sessionId) {
         String cleanUrl = baseUrl.replaceAll("/+$", "");
         String endpoint = cleanUrl + "/api/v1/pollers/android/pair";
 
@@ -68,6 +76,7 @@ public class ApiClient {
             body.put("enrollmentToken", enrollmentToken);
             body.put("merchantId", merchantId != null ? merchantId : "00000000-0000-0000-0000-000000000001");
             if (expiresAt > 0) body.put("expiresAt", expiresAt);
+            if (sessionId != null && !sessionId.isEmpty()) body.put("sessionId", sessionId);
             body.put("deviceName", deviceName != null && !deviceName.isEmpty() ? deviceName : Build.MODEL);
             body.put("deviceModel", Build.MANUFACTURER + " " + Build.MODEL);
 

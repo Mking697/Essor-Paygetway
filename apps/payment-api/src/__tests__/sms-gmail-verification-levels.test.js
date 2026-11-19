@@ -136,6 +136,7 @@ describe('2-Level Verification (SMS Gateway + Gmail) & Queue Management Tests', 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enrollmentToken: qrData.enrollmentToken,
+        sessionId: qrData.sessionId,
         deviceName: 'Samsung Galaxy S24 Bank Gateway'
       })
     });

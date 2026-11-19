@@ -457,6 +457,7 @@ public class MainActivity extends Activity {
             }
 
             final String merchantId = json.optString("merchantId", "00000000-0000-0000-0000-000000000001");
+            final String sessionId = json.optString("sessionId", null);
             final String deviceName = Build.MODEL;
 
             if (etBaseUrl != null) etBaseUrl.setText(serverUrl);
@@ -467,7 +468,7 @@ public class MainActivity extends Activity {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    final boolean success = apiClient.pair(serverUrl, token, deviceName, merchantId, version, expiresAt);
+                    final boolean success = apiClient.pair(serverUrl, token, deviceName, merchantId, version, expiresAt, sessionId);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {

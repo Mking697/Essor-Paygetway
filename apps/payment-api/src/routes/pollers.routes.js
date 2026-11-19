@@ -30,6 +30,23 @@ export function registerPollerRoutes(server, ctx) {
   // No public fallback: env value, else a random secret persisted in data/.secrets/.
   const enrollmentSecret = resolveSecret('android_enrollment_secret', 'ANDROID_ENROLLMENT_SECRET');
 
+  // Security Invariant: the pairing QR previously carried a client-supplied `expiresAt` that
+  // the pairing handler trusted verbatim, so a QR screenshot/payload never actually expired -
+  // whoever held the bytes could set expiresAt arbitrarily far in the future (or omit it) and
+  // pair at any later time. Each issued QR now gets a one-time server-side session recorded
+  // here; the pairing handler validates sessionId + server clock + single use against THIS
+  // record, never the client-supplied expiresAt field (which is still echoed for display only).
+  const pendingPairingSessions = new Map();
+  const PAIRING_SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const PAIRING_SESSION_SWEEP_EVERY = 50;
+  let pairingSessionOpsSinceSweep = 0;
+  function sweepExpiredPairingSessions() {
+    const now = Date.now();
+    for (const [sid, rec] of pendingPairingSessions) {
+      if (rec.expiresAt <= now || rec.used) pendingPairingSessions.delete(sid);
+    }
+  }
+
   // GET /api/v1/pollers/active-window (Enables deep intelligent DOM scanning for active amounts and dual-layer verification)
   server.get('/api/v1/pollers/active-window', async (req, res) => {
     // Observer-only. This returns every in-flight session with its exact amount and VPA,
@@ -395,7 +412,7 @@ export function registerPollerRoutes(server, ctx) {
   const handleAndroidPair = async (req, res) => {
     const body = await HttpServer.parseBody(req);
     const token = body.enrollmentToken || body.token;
-    const merchantId = body.merchantId || '00000000-0000-0000-0000-000000000001';
+    const sessionId = body.sessionId;
     const deviceName = body.deviceName || 'Android SMS Gateway';
     const deviceModel = body.deviceModel || 'Android Device';
 
@@ -405,7 +422,27 @@ export function registerPollerRoutes(server, ctx) {
       return;
     }
 
-    if (body.expiresAt && Date.now() > Number(body.expiresAt)) {
+    // Security Invariant: a QR-issued pairing carries `sessionId`, which is validated against
+    // the server-side record created in /pair-qr (never trusting the QR's own embedded
+    // expiresAt/merchantId - see pendingPairingSessions above). This closes the "QR screenshot
+    // never expires" gap: a leaked/reused QR's sessionId will have already expired or been
+    // consumed. A caller who was handed the raw enrollmentSecret directly by an operator
+    // (not via a scannable/shareable QR - e.g. manual APK configuration) has no sessionId and
+    // falls back to the pre-existing secret-only check; that path's security rests on the
+    // secret itself staying confidential, same as before this fix.
+    let merchantId = body.merchantId || '00000000-0000-0000-0000-000000000001';
+    if (sessionId) {
+      const pairingSession = pendingPairingSessions.get(sessionId);
+      if (!pairingSession || pairingSession.used || Date.now() > pairingSession.expiresAt) {
+        pendingPairingSessions.delete(sessionId);
+        HttpServer.json(res, 400, { error: 'PAIRING QR EXPIRED' });
+        return;
+      }
+      merchantId = pairingSession.merchantId;
+      // Single-use: consume the session immediately so a second pairing attempt with the
+      // same QR (e.g. a copied/replayed payload) cannot succeed even within the expiry window.
+      pairingSession.used = true;
+    } else if (body.expiresAt && Date.now() > Number(body.expiresAt)) {
       HttpServer.json(res, 400, { error: 'PAIRING QR EXPIRED' });
       return;
     }
@@ -759,7 +796,16 @@ export function registerPollerRoutes(server, ctx) {
     const baseUrl = runtime.apiUrl;
     const token = enrollmentSecret;
     const sessionId = crypto.randomUUID();
-    const expiresAt = Date.now() + (10 * 60 * 1000); // 10 minutes
+    const expiresAt = Date.now() + PAIRING_SESSION_TTL_MS;
+
+    // Record the server-side truth for this QR's expiry/single-use (see
+    // pendingPairingSessions above). The pairing handler trusts only this record, never the
+    // expiresAt/merchantId fields embedded in the QR payload sent back to the browser.
+    pendingPairingSessions.set(sessionId, { merchantId, expiresAt, used: false });
+    if (++pairingSessionOpsSinceSweep >= PAIRING_SESSION_SWEEP_EVERY) {
+      pairingSessionOpsSinceSweep = 0;
+      sweepExpiredPairingSessions();
+    }
 
     const pairingPayloadObj = {
       version: 'v1',
