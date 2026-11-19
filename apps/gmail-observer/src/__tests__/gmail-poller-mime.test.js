@@ -43,7 +43,8 @@ async function observePayload(t, payload, messageSnippet = snippet) {
         ...payload,
         headers: [
           { name: 'From', value: 'alerts@hdfcbank.net' },
-          { name: 'Subject', value: 'Credit alert' }
+          { name: 'Subject', value: 'Credit alert' },
+          { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=hdfcbank.net; spf=pass' }
         ]
       }
     });

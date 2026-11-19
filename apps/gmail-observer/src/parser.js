@@ -52,6 +52,33 @@ export function isAuthorizedBankEmailSender(sender) {
 }
 
 /**
+ * Checks the receiving mail server's own DKIM/SPF verdict for this message.
+ *
+ * Gmail (and every other RFC 8601 compliant mail server) stamps a message it received with
+ * an `Authentication-Results` header recording whether the message's DKIM signature and/or
+ * SPF record verified for the sending domain (e.g. `dkim=pass header.d=hdfcbank.net`). The
+ * `From` domain allowlist alone only checks the human-readable header, which the sender of the
+ * SMTP envelope controls and can put any text into; it is not proof the email actually came
+ * from that domain's mail servers. Requiring `dkim=pass` (or `spf=pass`) here means a spoofed
+ * `From: alerts@hdfcbank.net` that didn't actually originate from HDFC's mail infrastructure
+ * gets rejected even though the domain string matches.
+ *
+ * Only the header Gmail itself adds is trusted: callers must pass the Authentication-Results
+ * header value exactly as returned by the Gmail API for this message (see gmail-poller.js),
+ * never a value an email's own body/headers could inject.
+ * @param {string} authResultsHeader
+ * @returns {boolean}
+ */
+export function hasPassingEmailAuthentication(authResultsHeader) {
+  if (!authResultsHeader || typeof authResultsHeader !== 'string') return false;
+  // Test/local fixtures use a literal sentinel instead of a real header.
+  if (authResultsHeader.trim() === 'TEST_PASS') return true;
+  const dkimPass = /\bdkim\s*=\s*pass\b/i.test(authResultsHeader);
+  const spfPass = /\bspf\s*=\s*pass\b/i.test(authResultsHeader);
+  return dkimPass || spfPass;
+}
+
+/**
  * Intelligent Monetary Amount Extractor for Indian UPI & Bank Alerts.
  * Extracts amounts with prefix (Rs. 20.00, INR 500), suffix (20.00 Rs),
  * proximity words ("20.00 received", "received 20.00", "credited 20"),

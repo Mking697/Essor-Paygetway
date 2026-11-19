@@ -45,7 +45,8 @@ test('Issue #104: bounded pagination discovers alert on page two across multiple
         mimeType: 'text/plain',
         headers: [
           { name: 'From', value: 'alerts@hdfcbank.net' },
-          { name: 'Subject', value: 'Credit alert' }
+          { name: 'Subject', value: 'Credit alert' },
+          { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=hdfcbank.net; spf=pass' }
         ],
         body: {
           data: Buffer.from('Dear customer, Rs 150.00 credited to your account. UTR: 778899001122').toString('base64url')
@@ -110,7 +111,8 @@ test('Issue #104: downtime recovery discovers page two when page one was already
         mimeType: 'text/plain',
         headers: [
           { name: 'From', value: 'alerts@hdfcbank.net' },
-          { name: 'Subject', value: 'Credit alert' }
+          { name: 'Subject', value: 'Credit alert' },
+          { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=hdfcbank.net; spf=pass' }
         ],
         body: {
           data: Buffer.from('Dear customer, Rs 200.00 credited to your account. UTR: 889900112233').toString('base64url')
@@ -160,7 +162,7 @@ test('Issue #104: idle polling does not re-fetch page two when top message and p
       internalDate: String(Date.now()),
       payload: {
         mimeType: 'text/plain',
-        headers: [{ name: 'From', value: 'alerts@hdfcbank.net' }, { name: 'Subject', value: 'Credit' }],
+        headers: [{ name: 'From', value: 'alerts@hdfcbank.net' }, { name: 'Subject', value: 'Credit' }, { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=hdfcbank.net; spf=pass' }],
         body: { data: Buffer.from('Rs 100.00 credited UTR: 112233445566').toString('base64url') }
       }
     });
@@ -224,7 +226,7 @@ test('Issue #104: multi-cycle catch-up respects maxPagesPerCycle budget', async 
       internalDate: String(Date.now()),
       payload: {
         mimeType: 'text/plain',
-        headers: [{ name: 'From', value: 'alerts@hdfcbank.net' }, { name: 'Subject', value: 'Credit' }],
+        headers: [{ name: 'From', value: 'alerts@hdfcbank.net' }, { name: 'Subject', value: 'Credit' }, { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=hdfcbank.net; spf=pass' }],
         body: { data: Buffer.from('Rs 100.00 credited UTR: 112233445566').toString('base64url') }
       }
     });

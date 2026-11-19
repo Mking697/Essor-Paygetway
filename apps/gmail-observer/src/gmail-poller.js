@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PaymentObserverClient } from '@youpi/observer-sdk';
 import { getObserverToken } from '@youpi/common';
-import { BankEmailParser, redactSensitiveData, isAuthorizedBankEmailSender } from './parser.js';
+import { BankEmailParser, redactSensitiveData, isAuthorizedBankEmailSender, hasPassingEmailAuthentication } from './parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -288,6 +288,18 @@ export class GmailPoller {
       return { accepted: false, rejected: true, reason: 'UNAUTHORIZED_SENDER_DOMAIN' };
     }
 
+    // Security Invariant: the From header domain is only what the SMTP envelope/body claims -
+    // it is not proof of origin. Require Gmail's own DKIM/SPF verdict (Authentication-Results,
+    // stamped by Gmail's border MTA and not forgeable by the sender) to additionally pass
+    // before trusting this as a real bank alert. Local/test fixtures that don't go through
+    // real Gmail delivery (no authResults field at all) are exempted so existing simulated
+    // observations keep working; any message that DID arrive with real headers but failed
+    // authentication is rejected.
+    if (email.from && email.authResults !== undefined && !hasPassingEmailAuthentication(email.authResults)) {
+      console.warn(`[Gmail Observer] Rejected sender failing DKIM/SPF authentication: ${redactSensitiveData(sender)} (Spoof protection)`);
+      return { accepted: false, rejected: true, reason: 'EMAIL_AUTHENTICATION_FAILED' };
+    }
+
     let parsed = null;
     try {
       parsed = BankEmailParser.parse(email);
@@ -443,6 +455,9 @@ export class GmailPoller {
               const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
               const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
               const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
+              // Gmail's own border MTA stamps (and strips any sender-forged copy of) this
+              // header with its DKIM/SPF verdict - see parser.js hasPassingEmailAuthentication.
+              const authResults = headers.find(h => h.name.toLowerCase() === 'authentication-results')?.value || '';
               const body = extractBodyFromGmailPayload(msgData.payload) || msgData.snippet || '';
 
               await this.processEmail({
@@ -451,6 +466,7 @@ export class GmailPoller {
                 subject,
                 body,
                 from,
+                authResults,
                 date: dateStr ? new Date(dateStr) : new Date(Number(msgData.internalDate || Date.now()))
               });
             } catch (msgErr) {
